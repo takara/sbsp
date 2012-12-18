@@ -1,0 +1,7 @@
+RewriteEngine on
+RewriteRule ^api/restful/v1/avatar/([0-9]+)/@self/size=large;view=upper;dimension=defined;emotion=defined;$ /index.php?api=1&id=$1 [L]
+#
+# HTTP_RAW_POST_DATAが有効でないとＰＯＳＴデータはとれない
+#
+RewriteRule ^api/restful/v1/payment/@me/@self/@app/?(.+)$ /index.php?api=2&$1 [L]
+RewriteRule ^_pf_pay_confirm?(.+)$ /index.php?api=3&$1 [L]
