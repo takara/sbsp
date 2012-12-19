@@ -1,7 +1,7 @@
 <?php
 $url=$_REQUEST["url"];
 $appHostName=get_cfg_var("sbsp.app.hostname");
-//trace("[%s][%s]",__FILE__,print_r($_REQUEST,TRUE));
+//trace("[%s][%s]",__FILE__,$_REQUEST);
 session_start();
 switch(TRUE)
 {
@@ -36,13 +36,7 @@ case isset($_SESSION["id"]) && isset($_REQUEST['logout']):
 	break;
 // サーバー接続
 case isset($_SESSION["id"]):
-	/*$url=empty($url)?"http://web/":$url;
-	$url=str_replace("#","",$url);
-	$id=$_SESSION["id"];
-	$url="{$url}".((strpos($url,"?")!==FALSE)?"&":"?")."opensocial_app_id=12010871&opensocial_owner_id={$id}&opensocial_viewer_id={$id}";*/
 	$url=getAppURL($url,$_SESSION["id"]);
-	//trace("url0[$url]");
-	//trace("url1[$url1]");
 	$ch=curl_init();
 	curl_setopt($ch,CURLOPT_URL,$url);
 	curl_setopt($ch,CURLOPT_USERAGENT,$_SERVER["HTTP_USER_AGENT"]);
@@ -171,8 +165,6 @@ default:
 exit;
 /**
 * 配列をPOST用パラメタへ変換
-*
-* 配列の２階層までしか対応していない
 */
 function _array2param($ary,$akey=NULL)
 {
@@ -189,16 +181,33 @@ function _array2param($ary,$akey=NULL)
 	{
 		if(is_array($val))
 		{
+			if(is_null($akey))
+			{
+				$akey=array();
+			}
+			$wkey=$akey;
+			array_push($wkey,$key);
 			$ret=array_merge(
 				$ret,
-				_array2param($val,$key)
+				_array2param($val,$wkey)
 			);
 		} else {
 			if(is_null($akey))
 			{
 				$ret[$key]=$val;
 			} else {
-				$ret["{$akey}[{$key}]"]=$val;
+				$wkey=$akey;
+				array_push($wkey,$key);
+				$idx=array_shift($wkey);
+				if(count($wkey)>0)
+				{
+					foreach($wkey as $idx_str)
+					{
+						$idx.="[$idx_str]";
+					}
+				}
+				$ret[$idx]=$val;
+				unset($idx);
 			}
 		}
 	}
@@ -224,7 +233,14 @@ function getAppURL($url=NULL,$id=NULL)
 */
 function trace()
 {
-	$fmt="%s ";
+	static $log=NULL;
+	if(is_null($log))
+	{
+		$log=new log();
+	}
+	$args=func_get_args();
+	call_user_func_array(array($log,"output"),$args);
+/*	$fmt="%s ";
 	$args=func_get_args();
 	$fmt.=array_shift($args);
 	$param=array_merge(
@@ -232,7 +248,7 @@ function trace()
 		$args
 	);
 	$log=call_user_func_array("sprintf",$param);
-	error_log($log);
+	error_log($log);*/
 }
 /**
 * アバター
@@ -460,4 +476,123 @@ function mobage_api003()
 	$finish_url="http://{$_SERVER['HTTP_HOST']}/?url=".urlencode($res['payment']['finishUrl']);
 	header("Location: {$finish_url}");
 }
+class log
+{
+var $max_nest=10;
+/**
+* ログ出力
+*/
+function output($message)
+{
+	$args=func_get_args();
+	if(count($args)>1)
+	{
+		$fmt=array_shift($args);
+		for($i=0;$i<count($args);$i++)
+		{
+			if(is_array($args[$i]) || is_object($args[$i]))
+			{
+				$args[$i]=str_replace(
+					array("\t","\r\n","\r","\n"),
+					array(" ","[CR]","[CR]","[CR]"),
+					$this->_ParamToString(1,$args[$i])
+				);
+			}
+		}
+		$message=vsprintf($fmt,$args);
+		unset($fmt);
+	}
+	error_log($message);
+}
+/**
+* 配列再起用
+*/
+function _ArrayToString($sp,$p)
+{
+	if($sp>$this->max_nest)
+	{
+		return($this->_getNestError($sp));
+	}
+	$ret="";
+	reset($p);
+	while($item=each($p))
+	{
+		if(is_array($item["value"]))
+		{
+			$ret.=
+				sprintf("%s%s=>array(\n",str_repeat("\t",$sp),(is_int($item["key"])?$item["key"]:"\"{$item['key']}\"")).
+				$this->_ArrayToString($sp+1,$item["value"]).
+				sprintf("%s),\n",str_repeat("\t",$sp)).
+				"";
+		} else {
+			$ret.=sprintf("%s%s=>%s,\n",
+				str_repeat("\t",$sp),
+				(is_int($item["key"])?$item["key"]:"\"{$item['key']}\""),
+				$this->_ParamToString($sp+1,$item["value"]));
+		}
+	}
+	return($ret);
+}
+/**
+* 配列トレース(内部)
+*/
+function _ParamToString($sp,$arr)
+{
+	if($sp>$this->max_nest)
+	{
+		return($this->_getNestError($sp));
+	}
+	switch(gettype($arr))
+	{
+	case "boolean":			// (PHP 4以降)
+	case "integer":			//
+	case "double":			// (歴史的な理由によりfloatの 場合に"double"が返され、"float"とはなりません) 
+		$ret=$arr;
+		break;
+	case "string":			//
+		$ret="\"$arr\"";
+		break;
+	case "null":			// (PHP 4以降)
+	case "NULL":
+		$ret="NULL";
+		break;
+	case "array":			//
+		$ret=sprintf("array(\n%s)",$this->_ArrayToString($sp,$arr));
+		break;
+	case "object":			//
+		$ret=sprintf("%s object(\n%s%s)",
+			get_class($arr),
+			$this->_ObjectToString($sp,$arr),
+			str_repeat("\t",$sp-1));
+		break;
+	case "resource":		// (PHP 4以降)
+	case "user function":	// (PHP 3のみ。古い形式)
+	case "unknown type":	//
+	default:
+		$ret=sprintf("未対応の型(%s)\n",gettype($arr));
+		break;
+	}
+	return($ret);
+}
+/**
+* オブジェクト再起用
+*/
+function _ObjectToString($sp,$p)
+{
+	if($sp>$this->max_nest)
+	{
+		return($this->_getNestError($sp));
+	}
+	$ret="";
+	$vars=get_object_vars($p);
+	if(count($vars)>0)
+	{
+		foreach($vars as $pro=>$val)
+		{
+			$ret.=sprintf("%s[%s]=>%s\n",str_repeat("\t",$sp),$pro,$this->_ParamToString($sp+1,$val));
+		}
+	}
+	return($ret);
+}
+} // class log
 ?>
